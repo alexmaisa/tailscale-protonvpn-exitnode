@@ -33,13 +33,6 @@ Ensure you have the following installed:
   - ProtonVPN
   - Tailscale
 
-### 📁 Directory Structure
-
-.</br>
-├── gluetun/</br>
-├── compose.yaml</br>
-└── README.md
-
 ### 🔑 Step 1: Prepare Credentials and Update compose.yaml
 
 🔐 ProtonVPN
