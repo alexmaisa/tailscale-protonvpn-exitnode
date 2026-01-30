@@ -1,4 +1,4 @@
-# tailscale-protonvpn-exitnode
+# tailscale-vpn-exitnode
 This repository provides a docker-compose setup for creating an encrypted VPN connection using Tailscale and ProtonVPN. The configuration allows your containerized applications to route traffic securely through Tailscale and uses ProtonVPN as an exit-node, enabling flexible and private networking across devices and environments.
 
 ## 🔧 Features
@@ -33,19 +33,19 @@ Ensure you have the following installed:
   - ProtonVPN
   - Tailscale
 
-### 🔑 Step 1: Prepare Credentials and Update compose.yaml
+### 🔑 Step 1: Prepare Credential and Update compose.yaml
 
 🔐 ProtonVPN
-1.  Create WireGuard configuration\
-    Go to the ProtonVPN dashboard, go to “Downloads” menu, and select WireGuard configuration for your preferred server. Then copy the configuration.
+1.  Create WireGuard/OpenVPN configuration\
+    Go to the ProtonVPN dashboard, go to “Downloads” menu, and select WireGuard/OpenVPN configuration for your preferred server. Then copy the configuration.
 2.  Update compose.yaml\
-    Update compose.yaml variables with your WireGuard configuration.
+    Update compose.yaml variables with your WireGuard/OpenVPN configuration.
 
 🌐 Tailscale
-1.  Generate an Auth Key\
-    Visit https://login.tailscale.com/admin/settings/authkeys and create an auth key. You may turn on Reusable option. Save your Auth Key.
+1.  Generate a credential\
+    Visit https://login.tailscale.com/admin/settings/trust-credentials and create a credential. Go to "Keys" section, check "Write" on "Auth Keys" only. Save changes and get your credential.
 2.  Update compose.yaml\
-    Update TS_AUTHKEY= with Auth Key that generated before.
+    Update TS_AUTHKEY= with credential that generated before.
 
 ### ▶️ Step 2: Start the Services
 
