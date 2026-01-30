@@ -1,0 +1,53 @@
+services:
+  openvpn-tcp:
+    image: docker.io/qmcgaw/gluetun:latest
+    container_name: openvpn-tcp # change if you need to
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./gluetun:/gluetun # container path
+    environment:
+      - PUID=xxxx # change to your puid
+      - PGID=xxx # change to your pgid
+      - TZ=xxx/xxx # input your timezone e.g. Europe/Zurich
+      - VPN_SERVICE_PROVIDER=protonvpn # or another vpn provider
+      - VPN_TYPE=openvpn
+      - OPENVPN_PROTOCOL=tcp
+      - OPENVPN_USER=xxx # change to your openvpn username
+      - OPENVPN_PASSWORD=xxx # change to your openvpn password
+      - SERVER_COUNTRIES=xxx # country name e.g. Switzerland
+      - HTTPPROXY=off # on if you wish to enable
+      - SHADOWSOCKS=off # on if you wish to enable
+      #- FIREWALL_OUTBOUND_SUBNETS=xxx # optional, comment out to use local subnet with homelab services e.g. 192.168.1.0/24
+      - UPDATER_PERIOD=24h
+  tailscale-openvpn:
+    image: tailscale/tailscale:stable
+    container_name: tailscale-openvpn # change if you need to
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - tsovvarlib:/var/lib
+      - tsovstate:/state
+      - /dev/net/tun:/dev/net/tun
+    network_mode: "service:openvpn-tcp"
+    restart: unless-stopped
+    environment:
+      - TS_HOSTNAME=openvpn # named it as you wish
+      - TS_AUTHKEY=tskey-client--xxx # it's better using trust credentials than auth key
+      - TS_EXTRA_ARGS=--advertise-exit-node --advertise-tags=tag:vpn
+      - TS_NO_LOGS_NO_SUPPORT=true
+      - TS_STATE_DIR=/state
+      - TS_AUTH_ONCE=true
+      #- TS_ROUTES=xxx.xxx.xxx.xxx/xx # optional, comment out to use local subnet with homelab services e.g. 192.168.1.0/24, same as FIREWALL_OUTBOUND_SUBNETS
+
+volumes:
+  tsovvarlib:
+    driver: local
+  tsovstate:
+    driver: local
