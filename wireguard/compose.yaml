@@ -1,16 +1,16 @@
 services:
-  gluetun:
-    image: qmcgaw/gluetun
-    container_name: gluetun # change if you need to
+  wireguard:
+    image: docker.io/qmcgaw/gluetun:latest
+    container_name: wireguard # change if you need to
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
     volumes:
-      - /volume1/docker/gluetun/gluetun:/gluetun # container path
+      - ./gluetun:/gluetun # container path
     environment:
-      - VPN_SERVICE_PROVIDER=protonvpn
+      - VPN_SERVICE_PROVIDER=protonvpn # or another vpn provider
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=xxx # input your wireguard private key
       - WIREGUARD_PUBLIC_KEY=xxx # input your wireguard public key
@@ -23,11 +23,10 @@ services:
       - VPN_ACCELERATOR=on # optional
       - TZ=xxx # input your timezone e.g. Europe/Zurich
       - UPDATER_PERIOD=24h
-      - FIREWALL_OUTBOUND_SUBNETS=xxx.xxx.xxx.xxx/xx # local subnet with homelab services e.g. 192.168.1.0/24
-
-  tailscale-protonvpn:
-    image: tailscale/tailscale:latest
-    container_name: tailscale-protonvpn # change if you need to
+      #- FIREWALL_OUTBOUND_SUBNETS=xxx.xxx.xxx.xxx/xx # optional, comment out to use local subnet with homelab services e.g. 192.168.1.0/24
+  tailscale-wireguard:
+    image: tailscale/tailscale:stable
+    container_name: tailscale-wireguard # change if you need to
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -35,16 +34,17 @@ services:
       - tsvarlib:/var/lib
       - tsstate:/state
       - /dev/net/tun:/dev/net/tun
-    network_mode: "service:gluetun"
+    network_mode: "service:wireguard"
     restart: unless-stopped
     environment:
       - TS_HOSTNAME=xxx # named it as you wish
-      - TS_AUTHKEY=tskey-auth-xxx # your authkey
+      - TS_AUTHKEY=tskey-client--xxx # it's better using trust credentials than auth key
       - TS_EXTRA_ARGS=--advertise-exit-node
       - TS_NO_LOGS_NO_SUPPORT=true
       - TS_STATE_DIR=/state
       - TS_AUTH_ONCE=true
-      - TS_ROUTES=xxx.xxx.xxx.xxx/xx # local subnet with homelab services e.g. 192.168.1.0/24 same as FIREWALL_OUTBOUND_SUBNETS
+      #- TS_ROUTES=xxx.xxx.xxx.xxx/xx # optional, comment out to use local subnet with homelab services e.g. 192.168.1.0/24, same as FIREWALL_OUTBOUND_SUBNETS
+
 volumes:
   tsvarlib:
     driver: local
