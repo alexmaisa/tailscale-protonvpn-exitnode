@@ -7,46 +7,102 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    sysctls:
+      # The Tailscale container shares this network namespace, so IP
+      # forwarding has to be enabled here for the exit node to pass traffic.
+      # Drop the IPv6 line if your Docker daemon runs with IPv6 disabled.
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
     volumes:
       - ./gluetun:/gluetun # container path
     environment:
       - VPN_SERVICE_PROVIDER=protonvpn # or another vpn provider
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=xxx # change to your wireguard private key
-      - WIREGUARD_PUBLIC_KEY=xxx # change to your wireguard public key
-      - WIREGUARD_ADDRESSES=xxx.xxx.xxx.xxx/xx # change to your wireguard address
       - WIREGUARD_MTU=1320
       - SERVER_COUNTRIES=xxx # change to country name e.g. Switzerland
-      - WIREGUARD_ALLOWED_IPS=0.0.0.0/0,::/6 # ipv4 and ipv6
+      - WIREGUARD_ALLOWED_IPS=0.0.0.0/0,::/0 # ipv4 and ipv6
       - VPN_PORT_FORWARDING=on # optional
       - BLOCK_ADS=on # optional
       - VPN_ACCELERATOR=on # optional
       - TZ=xxx # input your timezone e.g. Europe/Zurich
       - UPDATER_PERIOD=24h
+      # WIREGUARD_PUBLIC_KEY / WIREGUARD_ADDRESSES are deliberately not set.
+      # Gluetun takes the server's public key and the client address from its
+      # own server list; pinning the values out of one downloaded config breaks
+      # the handshake as soon as gluetun rotates to another server in the
+      # country you selected.
       #- FIREWALL_OUTBOUND_SUBNETS=xxx.xxx.xxx.xxx/xx # optional, comment out to use local subnet with homelab services e.g. 192.168.1.0/24
   tailscale-wireguard:
     image: tailscale/tailscale:stable
     container_name: tailscale-wireguard # change if you need to
+    depends_on:
+      wireguard:
+        condition: service_healthy
     cap_add:
       - NET_ADMIN
       - NET_RAW
-    volumes:
-      - tsvarlib:/var/lib
-      - tsstate:/state
+    devices:
+      # Has to be a device rather than a volume: a bind-mounted device node is
+      # still blocked by the container's device cgroup.
       - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tsstate:/state
     network_mode: "service:wireguard"
     restart: unless-stopped
     environment:
       - TS_HOSTNAME=wireguard # named it as you wish
       - TS_AUTHKEY=tskey-client--xxx # it's better using trust credentials than auth key
       - TS_EXTRA_ARGS=--advertise-exit-node --advertise-tags=tag:vpn
+      # The image defaults to userspace networking, which cannot forward
+      # traffic for other nodes on Linux. Without this the node registers and
+      # advertises itself but silently carries nothing.
+      - TS_USERSPACE=false
+      # Gluetun writes its killswitch with iptables-nft, where the FORWARD
+      # policy is DROP. tailscaled defaults to iptables-legacy, so its
+      # ts-forward ACCEPT rules land in a backend gluetun's policy never
+      # consults and every forwarded packet is dropped. Both must use the same
+      # backend.
+      - TS_DEBUG_FIREWALL_MODE=nftables
       - TS_NO_LOGS_NO_SUPPORT=true
       - TS_STATE_DIR=/state
       - TS_AUTH_ONCE=true
       #- TS_ROUTES=xxx.xxx.xxx.xxx/xx # optional, comment out to use local subnet with homelab services e.g. 192.168.1.0/24, same as FIREWALL_OUTBOUND_SUBNETS
 
+  # Gluetun's WireGuard mode installs an ip rule (priority ~101) pointing at a
+  # table whose only entry is "default dev tun0". That is evaluated long before
+  # Tailscale's own rule at priority 5270, so replies addressed to tailnet
+  # clients get pushed into the VPN tunnel instead of back out tailscale0:
+  # traffic leaves fine and nothing ever comes back.
+  #
+  # A more-specific route for the tailnet CGNAT range fixes it. This runs on a
+  # loop because gluetun rebuilds its routing table on every reconnect, and it
+  # detects the table instead of hardcoding one. Gluetun's OpenVPN mode does
+  # not install the competing rule, so there this is a no-op.
+  tailscale-route-fix:
+    image: tailscale/tailscale:stable
+    container_name: tailscale-wireguard-route-fix # change if you need to
+    depends_on:
+      - tailscale-wireguard
+    network_mode: "service:wireguard"
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        while :; do
+          if ip link show tailscale0 >/dev/null 2>&1; then
+            for t in main $$(ip rule show | sed -n 's/.*lookup \([0-9][0-9]*\).*/\1/p' | sort -u); do
+              if ip route show table "$$t" 2>/dev/null | grep -q '^default .*dev tun0'; then
+                ip route replace 100.64.0.0/10 dev tailscale0 table "$$t" 2>/dev/null
+              fi
+            done
+          fi
+          sleep 20
+        done
+
 volumes:
-  tsvarlib:
-    driver: local
   tsstate:
     driver: local

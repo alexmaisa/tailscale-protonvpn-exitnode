@@ -9,6 +9,12 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    sysctls:
+      # The Tailscale container shares this network namespace, so IP
+      # forwarding has to be enabled here for the exit node to pass traffic.
+      # Drop the IPv6 line if your Docker daemon runs with IPv6 disabled.
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
     volumes:
       - ./gluetun:/gluetun # container path
     environment:
@@ -28,26 +34,69 @@ services:
   tailscale-openvpn:
     image: tailscale/tailscale:stable
     container_name: tailscale-openvpn # change if you need to
+    depends_on:
+      openvpn-tcp:
+        condition: service_healthy
     cap_add:
       - NET_ADMIN
       - NET_RAW
-    volumes:
-      - tsovvarlib:/var/lib
-      - tsovstate:/state
+    devices:
+      # Has to be a device rather than a volume: a bind-mounted device node is
+      # still blocked by the container's device cgroup.
       - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tsovstate:/state
     network_mode: "service:openvpn-tcp"
     restart: unless-stopped
     environment:
       - TS_HOSTNAME=openvpn # named it as you wish
       - TS_AUTHKEY=tskey-client--xxx # it's better using trust credentials than auth key
       - TS_EXTRA_ARGS=--advertise-exit-node --advertise-tags=tag:vpn
+      # The image defaults to userspace networking, which cannot forward
+      # traffic for other nodes on Linux. Without this the node registers and
+      # advertises itself but silently carries nothing.
+      - TS_USERSPACE=false
+      # Gluetun writes its killswitch with iptables-nft, where the FORWARD
+      # policy is DROP. tailscaled defaults to iptables-legacy, so its
+      # ts-forward ACCEPT rules land in a backend gluetun's policy never
+      # consults and every forwarded packet is dropped. Both must use the same
+      # backend.
+      - TS_DEBUG_FIREWALL_MODE=nftables
       - TS_NO_LOGS_NO_SUPPORT=true
       - TS_STATE_DIR=/state
       - TS_AUTH_ONCE=true
       #- TS_ROUTES=xxx.xxx.xxx.xxx/xx # optional, comment out to use local subnet with homelab services e.g. 192.168.1.0/24, same as FIREWALL_OUTBOUND_SUBNETS
 
+  # Kept identical to the WireGuard stack for symmetry. Gluetun's OpenVPN mode
+  # redirects traffic with the conventional 0.0.0.0/1 + 128.0.0.0/1 pair and
+  # installs no ip rule that outranks Tailscale's, so the return path is
+  # already correct here and this container makes no change. It is a safety
+  # net in case that changes; see the WireGuard compose file for the failure
+  # it guards against.
+  tailscale-route-fix:
+    image: tailscale/tailscale:stable
+    container_name: tailscale-openvpn-route-fix # change if you need to
+    depends_on:
+      - tailscale-openvpn
+    network_mode: "service:openvpn-tcp"
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        while :; do
+          if ip link show tailscale0 >/dev/null 2>&1; then
+            for t in main $$(ip rule show | sed -n 's/.*lookup \([0-9][0-9]*\).*/\1/p' | sort -u); do
+              if ip route show table "$$t" 2>/dev/null | grep -q '^default .*dev tun0'; then
+                ip route replace 100.64.0.0/10 dev tailscale0 table "$$t" 2>/dev/null
+              fi
+            done
+          fi
+          sleep 20
+        done
+
 volumes:
-  tsovvarlib:
-    driver: local
   tsovstate:
     driver: local
